@@ -1,0 +1,10 @@
+---
+applications:
+- name: go-helloworld
+  memory: 64m
+  buildpack: go_buildpack
+  command: cf-go-buildpack
+  env:
+    GOPACKAGENAME: github.com/amitoj/awesomeProject
+  services:
+  - go-helloworld-db
