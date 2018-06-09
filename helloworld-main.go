@@ -6,16 +6,37 @@ import (
 	"fmt"
 	"os"
 	"database/sql"
-
-	cfenv "github.com/cloudfoundry-community/go-cfenv"
+	"github.com/cloudfoundry-community/go-cfenv"
 	_ "github.com/lib/pq"
-	"errors"
 	"strings"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 type server struct {
 	DB *sql.DB
 }
+
+// Cfg struct
+var Cfg = CfgType{}
+
+// CfgType for mysql default database
+type CfgType struct {
+	Username      string
+	Password      string
+	Hostname      string
+	Port          string
+	DbType        string
+	isInMemory    bool
+	Database      string
+	ConnectString string
+	AdminConnect  string
+	Tablename     string
+	CharType      string
+}
+
+
+
+
 
 func (server *server) CreateHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -35,18 +56,19 @@ func (server *server) bootstrap(w http.ResponseWriter, r *http.Request) {
 
 func (server *server) incrementer(w http.ResponseWriter, r *http.Request) {
 	ip := guessIPofRequester(r)
+	fmt.Sprintf("ip = %s", ip)
 
 	var curCount = 0
-	err := server.DB.QueryRow("select value from counter where name = $1;", ip).Scan(&curCount)
+	err := server.DB.QueryRow("select value from counter where name = ?;", ip).Scan(&curCount)
 	switch err {
 	case nil:
 		curCount++
-		_, err = server.DB.Exec("update counter set value = $1 where name = $2;", curCount, ip)
+		_, err = server.DB.Exec("update counter set value = ? where name = ?;", curCount, ip)
 		if err != nil {
 			log.Panic(err)
 		}
 	case sql.ErrNoRows:
-		_, err = server.DB.Exec("insert into counter(name, value) values($1, $2);", ip, 1)
+		_, err = server.DB.Exec("insert into counter(name, value) values(?, ?);", ip, 1)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -86,26 +108,27 @@ func getDBFromCF() (*sql.DB, error) {
 		return nil, err
 	}
 
-	dbEnv, err := appEnv.Services.WithTag("mysql")
-	if err != nil {
-		return nil, err
+	boundServices, err := appEnv.Services.WithTag("mysql")
+	if (err != nil) || (len(boundServices) <= 0) {
+		log.Panic("====================================================================================")
+		log.Panic("Error cannot find a bound service with tag mysql ...")
+		log.Panic("====================================================================================")
 	}
 
-	if len(dbEnv) != 1 {
-		return nil, errors.New("expecting 1 database")
-	}
+	dbParams := "autocommit=true"
 
-	dbURI, ok := dbEnv[0].CredentialString("uri")
-	if !ok {
-		return nil, errors.New("no uri in creds for db")
-	}
+	Cfg.DbType = "mysql"
+	boundService := boundServices[0]
+	Cfg.Username, _ = boundService.CredentialString("username")
+	Cfg.Password, _ = boundService.CredentialString("password")
+	Cfg.Hostname, _ = boundService.CredentialString("hostname")
+	p, _ := boundService.Credentials["port"]
+	Cfg.Port = fmt.Sprintf("%.0f", p)
+	Cfg.Database, _ = boundService.CredentialString("name")
+	Cfg.CharType = "VARCHAR(255)"
+	Cfg.ConnectString = fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?%v", Cfg.Username, Cfg.Password, Cfg.Hostname, Cfg.Port, Cfg.Database, dbParams)
 
-	idx := strings.Index(dbURI, "?")
-	if idx >= 0 {
-		dbURI = dbURI[:idx]
-	}
-
-	return sql.Open("mysql", dbURI)
+	return sql.Open(Cfg.DbType, Cfg.ConnectString)
 }
 
 func main() {

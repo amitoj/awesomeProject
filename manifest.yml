@@ -1,9 +1,9 @@
 ---
 applications:
-- name: go-helloworld
+- name: awesomeProject
   memory: 64m
   buildpack: go_buildpack
-  command: cf-go-buildpack
+  command: awesomeProject
   env:
     GOPACKAGENAME: github.com/amitoj/awesomeProject
   services:
